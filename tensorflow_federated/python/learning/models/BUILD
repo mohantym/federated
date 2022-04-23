@@ -21,7 +21,9 @@ py_library(
     deps = [
         "//tensorflow_federated/python/common_libs:py_typecheck",
         "//tensorflow_federated/python/learning:model",
+        "//tensorflow_federated/python/learning/metrics",
         "//tensorflow_federated/python/learning/metrics:finalizer",
+        "//tensorflow_federated/python/learning/metrics:keras_utils",
         "//tensorflow_federated/python/tensorflow_libs:variable_utils",
         "@org_tensorflow//tensorflow:tensorflow_py",
     ],

@@ -148,6 +148,42 @@ class FunctionalTest(tf.test.TestCase):
         functional_model.predict_on_batch(functional_model.initial_weights,
                                           example_batch[0]), [[0.]] * 5)
 
+  def test_metrics(self):
+    metric_constructors = collections.OrderedDict(
+        accuracy=tf.keras.metrics.Accuracy,
+        precisions=lambda: tf.keras.metrics.Precision(thresholds=[0.25, 0.5]))
+    dataset = create_test_dataset()
+    input_spec = dataset.element_spec
+    functional_model = functional.FunctionalModel(
+        initial_weights(),
+        forward_pass,
+        predict_on_batch,
+        input_spec,
+        metrics_constructor=metric_constructors)
+    with self.subTest('initialize'):
+      state = functional_model.initialize_metrics_state()
+      metrics = tf.nest.map_structure(lambda constructor: constructor(),
+                                      metric_constructors)
+      self.assertAllClose(
+          state, tf.nest.map_structure(lambda metric: metric.variables,
+                                       metrics))
+    with self.subTest('update'):
+      predictions = [0.2, 0.3, 1.0]
+      labels = [0.0, 0.0, 1.0]
+      state = functional_model.update_metrics_state(
+          state, y_true=labels, y_pred=predictions)
+      tf.nest.map_structure(
+          lambda metric: metric.update_state(y_true=labels, y_pred=predictions),
+          metrics)
+      self.assertAllClose(
+          state, tf.nest.map_structure(lambda metric: metric.variables,
+                                       metrics))
+    with self.subTest('finalize'):
+      final_metrics = functional_model.finalize_metrics(state)
+      metric_result = tf.nest.map_structure(lambda metric: metric.result(),
+                                            metrics)
+      self.assertAllClose(final_metrics, metric_result)
+
   def test_construct_from_keras(self):
     keras_model = create_test_keras_model()
     # Assign some variables after initialization so we can assert that they

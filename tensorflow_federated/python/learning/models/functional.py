@@ -28,7 +28,7 @@ model with `tff.learning.models.model_from_functional`.
 """
 
 import collections
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union, OrderedDict
+from typing import Any, Callable, Dict, List, Mapping, OrderedDict, Optional, Sequence, Tuple, TypeVar, Union
 
 import numpy as np
 import tensorflow as tf
@@ -36,8 +36,10 @@ import tensorflow as tf
 from tensorflow_federated.python.common_libs import py_typecheck
 from tensorflow_federated.python.learning import model as model_lib
 from tensorflow_federated.python.learning.metrics import finalizer
+from tensorflow_federated.python.learning.metrics import keras_utils
 from tensorflow_federated.python.tensorflow_libs import variable_utils
 
+State = TypeVar('State')
 Weight = Union[np.ndarray, int, float]
 WeightStruct = Union[Sequence[Weight], Mapping[str, Weight]]
 ModelWeights = Tuple[WeightStruct, WeightStruct]
@@ -54,14 +56,14 @@ class ValueMustNotBeTFError(TypeError):
 class FunctionalModel():
   """A model that parameterizes forward pass by model weights."""
 
-  def __init__(
-      self,
-      initial_weights: ModelWeights,
-      forward_pass_fn: Callable[[ModelWeights, Any, bool],
-                                model_lib.BatchOutput],
-      predict_on_batch_fn: Callable[[ModelWeights, Any, bool], Any],
-      input_spec,
-  ):
+  def __init__(self,
+               initial_weights: ModelWeights,
+               forward_pass_fn: Callable[[ModelWeights, Any, bool],
+                                         model_lib.BatchOutput],
+               predict_on_batch_fn: Callable[[ModelWeights, Any, bool], Any],
+               input_spec: Any,
+               metrics_constructor: Optional[Callable[[], OrderedDict[
+                   str, tf.keras.metrics.Metric]]] = None):
     """Initializes a `FunctionalModel`.
 
     Example model implementing linear regression:
@@ -116,6 +118,9 @@ class FunctionalModel():
         of `tf.TensorSpec` that defines the shape and dtypes of `batch_input` to
         `forward_pass_fn`. `x` corresponds to batched model inputs and `y`
         corresponds to batched labels for those inputs.
+      metrics_constructor: An optional `OrderedDict` of `str` names to no-arg
+        callables that create `tf.keras.metrics.Metric` instances (for example,
+        the class `tf.keras.metrics.Accuracy`).
     """
 
     def check_tf_function_decorated(fn, arg_name):
@@ -142,6 +147,11 @@ class FunctionalModel():
     check_tf_function_decorated(predict_on_batch_fn, 'predict_on_batch_fn')
     self._predict_on_batch_fn = predict_on_batch_fn
     self._input_spec = input_spec
+    if metrics_constructor is not None:
+      metric_fns = keras_utils.create_functional_metric_fns(metrics_constructor)
+      self._initialize_metrics_state = metric_fns[0]
+      self._update_metrics_state = metric_fns[1]
+      self._finalize_metrics = metric_fns[2]
 
   @property
   def initial_weights(self) -> ModelWeights:
@@ -162,6 +172,23 @@ class FunctionalModel():
                        training: bool = True):
     """Returns tensor(s) interpretable by the loss function."""
     return self._predict_on_batch_fn(model_weights, x, training)
+
+  @tf.function
+  def initialize_metrics_state(self) -> State:
+    return self._initialize_metrics_state()
+
+  @tf.function
+  def update_metrics_state(self,
+                           state: State,
+                           y_true: Any,
+                           y_pred: Any,
+                           sample_weight: Optional[Any] = None) -> State:
+    return self._update_metrics_state(
+        state, y_true=y_true, y_pred=y_pred, sample_weight=sample_weight)
+
+  @tf.function
+  def finalize_metrics(self, state: State) -> Any:
+    return self._finalize_metrics(state)
 
   @property
   def input_spec(self):
@@ -292,6 +319,8 @@ def functional_model_from_keras(
     keras_model: Union[tf.keras.Model, Callable[[], tf.keras.Model]],
     loss_fn: tf.keras.losses.Loss,
     input_spec: Union[Sequence[Any], Mapping[str, Any]],
+    metrics_constructor: Optional[Callable[[], OrderedDict[
+        str, tf.keras.metrics.Metric]]] = None
 ) -> FunctionalModel:
   """Converts a `tf.keras.Model` to a `tff.learning.models.FunctionalModel`.
 
@@ -310,6 +339,9 @@ def functional_model_from_keras(
         that have multiple outputs will send all outputs to the `loss_fn`.
     loss_fn: A `tf.keras.losses.Loss` object.
     input_spec: A structure of `tf.TensorSpec` defining the input to the model.
+    metrics_constructor: An optional `OrderedDict` of `str` names to no-arg
+      callables that create `tf.keras.metrics.Metric` instances (for example,
+      the class `tf.keras.metrics.Accuracy`).
 
   Returns:
     A `tff.learning.models.FunctionalModel`.
@@ -503,4 +535,5 @@ def functional_model_from_keras(
       initial_weights=initial_weights,
       forward_pass_fn=forward_pass,
       predict_on_batch_fn=predict_on_batch,
-      input_spec=input_spec)
+      input_spec=input_spec,
+      metrics_constructor=metrics_constructor)

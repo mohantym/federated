@@ -11,7 +11,6 @@ py_library(
     name = "metrics",
     srcs = ["__init__.py"],
     srcs_version = "PY3",
-    visibility = ["//tensorflow_federated/python/learning:__pkg__"],
     deps = [
         ":aggregator",
         ":counters",

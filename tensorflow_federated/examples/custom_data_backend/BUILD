@@ -62,3 +62,17 @@ py_test(
         "@org_tensorflow//tensorflow:tensorflow_py",
     ],
 )
+
+py_test(
+    name = "data_backend_e2e_example_test",
+    srcs = ["data_backend_e2e_example_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    tags = ["nokokoro"],
+    deps = [
+        "//tensorflow_federated",
+        "//tensorflow_federated/proto/v0:computation_py_pb2",
+        "@absl_py//absl/testing:parameterized",
+        "@org_tensorflow//tensorflow:tensorflow_py",
+    ],
+)
